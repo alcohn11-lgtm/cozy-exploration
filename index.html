@@ -2,232 +2,271 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Cozy Survival RPG</title>
+<title>🐱 Cozy Cat Explorer</title>
 <style>
-  body {
-    margin: 0;
-    font-family: monospace;
-    background: linear-gradient(#0f172a, #020617);
+  body { margin: 0; overflow: hidden; font-family: system-ui; background:#020617; }
+  #ui {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    background: rgba(15,23,42,0.9);
     color: #e5e7eb;
+    padding: 12px 14px;
+    border-radius: 12px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+    font-size: 14px;
   }
-  .ui {
-    display: grid;
-    grid-template-columns: 220px 1fr;
-    height: 100vh;
-  }
-  .panel {
-    background: rgba(15,23,42,0.95);
-    padding: 14px;
-    border-right: 2px solid #1e293b;
-  }
-  .game {
+  #title {
+    position: fixed;
+    inset: 0;
     display: flex;
     align-items: center;
     justify-content: center;
+    background: radial-gradient(circle at top, #1e293b, #020617);
+    color: #e5e7eb;
+    z-index: 10;
+    flex-direction: column;
+    gap: 12px;
   }
-  .map {
-    width: 320px;
-    height: 320px;
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    grid-template-rows: repeat(5, 1fr);
-    gap: 4px;
-  }
-  .tile {
-    background: #020617;
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
-    opacity: 0.7;
-  }
-  .player {
+  button {
     background: #38bdf8;
-    color: #020617;
-    font-weight: bold;
-    opacity: 1;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 16px;
+    font-size: 16px;
+    cursor: pointer;
   }
-  .forest { background: #14532d; }
-  .lake { background: #1e3a8a; }
-  .meadow { background: #365314; }
-  .night .tile { filter: brightness(0.7); }
-  .log {
-    margin-top: 10px;
-    min-height: 60px;
-    font-size: 13px;
-    color: #cbd5f5;
-  }
-  .bar {
-    height: 8px;
-    background: #1e293b;
-    border-radius: 6px;
-    overflow: hidden;
-    margin-bottom: 6px;
-  }
-  .fill { height: 100%; background: #4ade80; }
-  .red { background: #f87171; }
 </style>
 </head>
 <body>
-<div class="ui">
-  <div class="panel">
-    <h3>Cozy Survival</h3>
-    <p><b>Time:</b> <span id="time">Day</span></p>
 
-    <b>Health</b>
-    <div class="bar"><div id="healthBar" class="fill red"></div></div>
-
-    <b>Hunger</b>
-    <div class="bar"><div id="hungerBar" class="fill"></div></div>
-
-    <h4>Inventory</h4>
-    Food: <span id="food">0</span><br>
-    Herbs: <span id="herbs">0</span><br>
-    Fish: <span id="fish">0</span><br>
-
-    <h4>Skills</h4>
-    Hunting: <span id="huntSkill">1</span><br>
-    Gathering: <span id="gatherSkill">1</span><br>
-    Fishing: <span id="fishSkill">1</span><br>
-
-    <h4>Quest</h4>
-    Collect 3 Food, 3 Herbs, 3 Fish
-
-    <div class="log" id="log"></div>
-  </div>
-
-  <div class="game">
-    <div id="map" class="map"></div>
-  </div>
+<div id="title">
+  <h1>🐱 Cozy Cat Explorer</h1>
+  <p>Explore peacefully. No enemies. Just vibes.</p>
+  <button onclick="startGame()">Start Exploring</button>
 </div>
 
-<script>
-const mapSize = 5;
-let player = { x: 2, y: 2 };
-let time = "Day";
-let health = 100;
-let hunger = 100;
+<div id="ui" style="display:none">
+  WASD = Move · Mouse = Look · E = Fish near pond · Collectibles: <span id="collectibles">0</span> · Fish: <span id="fish">0</span> · Time: <span id="time">06:00</span>
+</div>
 
-let inv = { food: 0, herbs: 0, fish: 0 };
-let skills = { hunt: 1, gather: 1, fish: 1 };
+<script type="module">
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js";
+import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js";
 
-const tiles = [];
-const mapEl = document.getElementById("map");
-const logEl = document.getElementById("log");
+let scene, camera, renderer, cat, controls, keys = {};
+let collectibles = [], collected = 0;
+let fishCount = 0;
+let clock = 6; // 6 AM start
+let pond, rainParticles = [];
+let listener, ambientSound, birdsSound, waterSound;
 
-function initMap() {
-  for (let i = 0; i < mapSize * mapSize; i++) {
-    const t = document.createElement("div");
-    const r = Math.random();
-    t.className = "tile " + (r < 0.33 ? "forest" : r < 0.66 ? "lake" : "meadow");
-    tiles.push(t);
-    mapEl.appendChild(t);
-  }
-  render();
+function startGame() {
+  document.getElementById("title").style.display = "none";
+  document.getElementById("ui").style.display = "block";
+  init();
+  animate();
 }
 
-function render() {
-  tiles.forEach((t, i) => {
-    t.textContent = "";
-    const x = i % mapSize;
-    const y = Math.floor(i / mapSize);
-    t.classList.toggle("player", x === player.x && y === player.y);
-    if (x === player.x && y === player.y) t.textContent = "☺";
+window.startGame = startGame;
+
+function init() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x1e293b);
+
+  camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 1000);
+  camera.position.set(0, 6, 10);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(innerWidth, innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  // Lights
+  const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+  dirLight.position.set(10, 20, 10);
+  scene.add(dirLight);
+  const ambient = new THREE.AmbientLight(0x88aaff, 0.6);
+  scene.add(ambient);
+
+  // Ground
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(500, 500),
+    new THREE.MeshStandardMaterial({ color: 0x14532d })
+  );
+  ground.rotation.x = -Math.PI/2;
+  scene.add(ground);
+
+  // Trees
+  for(let i=0;i<100;i++){
+    const tree = new THREE.Mesh(
+      new THREE.ConeGeometry(1,4,6),
+      new THREE.MeshStandardMaterial({color:0x064e3b})
+    );
+    tree.position.set((Math.random()-0.5)*400,2,(Math.random()-0.5)*400);
+    scene.add(tree);
+  }
+
+  // Flowers
+  for(let i=0;i<50;i++){
+    const flower = new THREE.Mesh(
+      new THREE.ConeGeometry(0.2,0.5,6),
+      new THREE.MeshStandardMaterial({color:0xff49c4})
+    );
+    flower.position.set((Math.random()-0.5)*400,0.25,(Math.random()-0.5)*400);
+    scene.add(flower);
+  }
+
+  // Pond
+  pond = new THREE.Mesh(
+    new THREE.CylinderGeometry(5,5,0.2,32),
+    new THREE.MeshStandardMaterial({color:0x3b82f6})
+  );
+  pond.position.set(20,0.1,20);
+  scene.add(pond);
+
+  // Collectibles (leaves/berries)
+  for(let i=0;i<30;i++){
+    const c = new THREE.Mesh(
+      new THREE.SphereGeometry(0.3,6,6),
+      new THREE.MeshStandardMaterial({color: Math.random()>0.5?0x10b981:0xfbbf24})
+    );
+    c.position.set((Math.random()-0.5)*400,0.3,(Math.random()-0.5)*400);
+    scene.add(c);
+    collectibles.push(c);
+  }
+
+  // Load Cat Model
+  const loader = new GLTFLoader();
+  loader.load("https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Models/2.0/Cube/glTF/Cube.gltf", gltf => {
+    cat = gltf.scene;
+    cat.scale.set(0.5,0.5,0.5);
+    cat.position.set(0,0,0);
+    scene.add(cat);
   });
 
-  document.getElementById("time").textContent = time;
-  document.getElementById("food").textContent = inv.food;
-  document.getElementById("herbs").textContent = inv.herbs;
-  document.getElementById("fish").textContent = inv.fish;
+  // Controls
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enablePan = false;
+  controls.enableZoom = false;
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.05;
 
-  document.getElementById("huntSkill").textContent = skills.hunt;
-  document.getElementById("gatherSkill").textContent = skills.gather;
-  document.getElementById("fishSkill").textContent = skills.fish;
+  window.addEventListener("resize",()=>{
+    camera.aspect=innerWidth/innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth,innerHeight);
+  });
 
-  document.getElementById("healthBar").style.width = health + "%";
-  document.getElementById("hungerBar").style.width = hunger + "%";
+  document.addEventListener("keydown", e=> keys[e.key.toLowerCase()] = true);
+  document.addEventListener("keyup", e=> keys[e.key.toLowerCase()] = false);
 
-  document.body.classList.toggle("night", time === "Night");
-}
+  // Fishing
+  document.addEventListener("keydown", e=>{
+    if(e.key.toLowerCase() === "e" && cat.position.distanceTo(pond.position)<6){
+      fishCount++;
+      document.getElementById("fish").textContent = fishCount;
+      console.log("Caught a fish!");
+    }
+  });
 
-function log(msg) {
-  logEl.textContent = msg;
-}
+  // Load saved collectibles
+  const saved = localStorage.getItem("cozy_cat_collected");
+  if(saved) collected = parseInt(saved);
+  document.getElementById("collectibles").textContent = collected;
 
-function move(dx, dy) {
-  player.x = Math.max(0, Math.min(mapSize - 1, player.x + dx));
-  player.y = Math.max(0, Math.min(mapSize - 1, player.y + dy));
-  hunger = Math.max(0, hunger - 3);
-  if (hunger === 0) health = Math.max(0, health - 2);
-  maybeEncounter();
-  render();
-}
+  const savedFish = localStorage.getItem("cozy_cat_fish");
+  if(savedFish) fishCount = parseInt(savedFish);
+  document.getElementById("fish").textContent = fishCount;
 
-function currentTile() {
-  return tiles[player.y * mapSize + player.x].classList[1];
-}
+  // Sounds
+  listener = new THREE.AudioListener();
+  camera.add(listener);
+  ambientSound = new THREE.Audio(listener);
+  birdsSound = new THREE.Audio(listener);
+  waterSound = new THREE.Audio(listener);
+  const audioLoader = new THREE.AudioLoader();
+  audioLoader.load("https://cdn.jsdelivr.net/gh/mrdoob/three.js@master/examples/sounds/358232_j_s_song.ogg", buffer=>{
+    ambientSound.setBuffer(buffer); ambientSound.setLoop(true); ambientSound.setVolume(0.2); ambientSound.play();
+  });
+  audioLoader.load("https://cdn.jsdelivr.net/gh/mrdoob/three.js@master/examples/sounds/birds.ogg", buffer=>{
+    birdsSound.setBuffer(buffer); birdsSound.setLoop(true); birdsSound.setVolume(0.15); birdsSound.play();
+  });
+  audioLoader.load("https://cdn.jsdelivr.net/gh/mrdoob/three.js@master/examples/sounds/water.ogg", buffer=>{
+    waterSound.setBuffer(buffer); waterSound.setLoop(true); waterSound.setVolume(0.1); waterSound.play();
+  });
 
-function hunt() {
-  if (currentTile() !== "forest") return log("You need a forest to hunt.");
-  const chance = Math.random() < 0.4 + skills.hunt * 0.1;
-  if (chance) {
-    inv.food++;
-    skills.hunt++;
-    log("You hunted successfully. +Food, Hunting skill up!");
-  } else log("The animals hid today.");
-  render(); checkQuest();
-}
-
-function gather() {
-  if (currentTile() !== "meadow") return log("Best herbs grow in meadows.");
-  inv.herbs++;
-  skills.gather++;
-  log("You gathered fragrant herbs.");
-  render(); checkQuest();
-}
-
-function fish() {
-  if (currentTile() !== "lake") return log("You need water to fish.");
-  const chance = Math.random() < 0.4 + skills.fish * 0.1;
-  if (chance) {
-    inv.fish++;
-    skills.fish++;
-    log("You caught a shimmering fish!");
-  } else log("The fish were shy today.");
-  render(); checkQuest();
-}
-
-function maybeEncounter() {
-  if (Math.random() < 0.15) {
-    health = Math.max(0, health - 5);
-    log("A curious wolf startled you. You are okay, just shaken.");
+  // Rain
+  const rainGeo = new THREE.BufferGeometry();
+  const rainCount = 500;
+  const rainPositions = [];
+  for(let i=0;i<rainCount;i++){
+    rainPositions.push((Math.random()-0.5)*400, Math.random()*50+5, (Math.random()-0.5)*400);
   }
+  rainGeo.setAttribute("position", new THREE.Float32BufferAttribute(rainPositions,3));
+  const rainMat = new THREE.PointsMaterial({color:0xaaaaff, size:0.1, transparent:true});
+  const rain = new THREE.Points(rainGeo,rainMat);
+  scene.add(rain);
+  rainParticles.push(rain);
 }
 
-function checkQuest() {
-  if (inv.food >= 3 && inv.herbs >= 3 && inv.fish >= 3) {
-    log("🌟 Quest Complete! You’ve built a cozy camp and survived peacefully.");
+function animate() {
+  requestAnimationFrame(animate);
+
+  if(cat){
+    const speed = 0.2;
+    if(keys["w"]) cat.position.z -= speed;
+    if(keys["s"]) cat.position.z += speed;
+    if(keys["a"]) cat.position.x -= speed;
+    if(keys["d"]) cat.position.x += speed;
+
+    controls.target.copy(cat.position);
+    controls.update();
+
+    checkCollectibles();
   }
+
+  updateTime();
+  updateRain();
+  renderer.render(scene,camera);
 }
 
-setInterval(() => {
-  time = time === "Day" ? "Night" : "Day";
-  render();
-}, 15000);
+function checkCollectibles(){
+  collectibles.forEach((c, idx)=>{
+    if(cat.position.distanceTo(c.position)<1){
+      scene.remove(c);
+      collectibles.splice(idx,1);
+      collected++;
+      document.getElementById("collectibles").textContent = collected;
+      localStorage.setItem("cozy_cat_collected", collected);
+    }
+  });
+  localStorage.setItem("cozy_cat_fish", fishCount);
+}
 
-document.addEventListener("keydown", e => {
-  if (e.key === "w") move(0, -1);
-  if (e.key === "s") move(0, 1);
-  if (e.key === "a") move(-1, 0);
-  if (e.key === "d") move(1, 0);
-  if (e.key === "h") hunt();
-  if (e.key === "g") gather();
-  if (e.key === "f") fish();
-});
+function updateTime(){
+  clock += 0.002; // speed of time
+  if(clock>24) clock=0;
+  const hours=Math.floor(clock);
+  const minutes=Math.floor((clock%1)*60);
+  document.getElementById("time").textContent = `${hours.toString().padStart(2,"0")}:${minutes.toString().padStart(2,"0")}`;
 
-initMap();
-log("Welcome to your cozy wilderness. Use W/A/S/D to explore.");
+  // Ambient lighting
+  const t = Math.sin((clock/24)*Math.PI*2)*0.5+0.5;
+  scene.background = new THREE.Color().setHSL(0.6,0.6,t*0.2+0.1);
+}
+
+function updateRain(){
+  rainParticles.forEach(r=>{
+    const pos = r.geometry.attributes.position.array;
+    for(let i=1;i<pos.length;i+=3){
+      pos[i]-=0.5;
+      if(pos[i]<0) pos[i]=50;
+    }
+    r.geometry.attributes.position.needsUpdate=true;
+  });
+}
 </script>
 </body>
 </html>
+
