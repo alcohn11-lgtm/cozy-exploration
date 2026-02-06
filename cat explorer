@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>🐱 Cozy Cat Explorer</title>
+<style>
+  body { margin: 0; overflow: hidden; font-family: system-ui; background:#020617; }
+  #ui {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    background: rgba(15,23,42,0.9);
+    color: #e5e7eb;
+    padding: 12px 14px;
+    border-radius: 12px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+    font-size: 14px;
+  }
+  #title {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle at top, #1e293b, #020617);
+    color: #e5e7eb;
+    z-index: 10;
+    flex-direction: column;
+    gap: 12px;
+  }
+  button {
+    background: #38bdf8;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 16px;
+    font-size: 16px;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<div id="title">
+  <h1>🐱 Cozy Cat Explorer</h1>
+  <p>Explore peacefully. No enemies. Just vibes.</p>
+  <button onclick="startGame()">Start Exploring</button>
+</div>
+
+<div id="ui" style="display:none">
+  WASD = Move · Mouse = Look · E = Fish near pond · Collectibles: <span id="collectibles">0</span> · Fish: <span id="fish">0</span> · Time: <span id="time">06:00</span>
+</div>
+
+<script type="module">
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js";
+import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js";
+
+let scene, camera, renderer, cat, controls, keys = {};
+let collectibles = [], collected = 0;
+let fishCount = 0;
+let clock = 6; // 6 AM start
+let pond, rainParticles = [];
+let listener, ambientSound, birdsSound, waterSound;
+
+function startGame() {
+  document.getElementById("title").style.display = "none";
+  document.getElementById("ui").style.display = "block";
+  init();
+  animate();
+}
+
+window.startGame = startGame;
+
+function init() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x1e293b);
+
+  camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 1000);
+  camera.position.set(0, 6, 10);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(innerWidth, innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  // Lights
+  const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+  dirLight.position.set(10, 20, 10);
+  scene.add(dirLight);
+  const ambient = new THREE.AmbientLight(0x88aaff, 0.6);
+  scene.add(ambient);
+
+  // Ground
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(500, 500),
+    new THREE.MeshStandardMaterial({ color: 0x14532d })
+  );
+  ground.rotation.x = -Math.PI/2;
+  scene.add(ground);
+
+  // Trees
+  for(let i=0;i<100;i++){
+    const tree = new THREE.Mesh(
+      new THREE.ConeGeometry(1,4,6),
+      new THREE.MeshStandardMaterial({color:0x064e3b})
+    );
+    tree.position.set((Math.random()-0.5)*400,2,(Math.random()-0.5)*400);
+    scene.add(tree);
+  }
+
+  // Flowers
+  for(let i=0;i<50;i++){
+    const flower = new THREE.Mesh(
+      new THREE.ConeGeometry(0.2,0.5,6),
+      new THREE.MeshStandardMaterial({color:0xff49c4})
+    );
+    flower.position.set((Math.random()-0.5)*400,0.25,(Math.random()-0.5)*400);
+    scene.add(flower);
+  }
+
+  // Pond
+  pond = new THREE.Mesh(
+    new THREE.CylinderGeometry(5,5,0.2,32),
+    new THREE.MeshStandardMaterial({color:0x3b82f6})
+  );
+  pond.position.set(20,0.1,20);
+  scene.add(pond);
+
+  // Collectibles (leaves/berries)
+  for(let i=0;i<30;i++){
+    const c = new THREE.Mesh(
+      new THREE.SphereGeometry(0.3,6,6),
+      new THREE.MeshStandardMaterial({color: Math.random()>0.5?0x10b981:0xfbbf24})
+    );
+    c.position.set((Math.random()-0.5)*400,0.3,(Math.random()-0.5)*400);
+    scene.add(c);
+    collectibles.push(c);
+  }
+
+  // Load Cat Model
+  const loader = new GLTFLoader();
+  loader.load("https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Models/2.0/Cube/glTF/Cube.gltf", gltf => {
+    cat = gltf.scene;
+    cat.scale.set(0.5,0.5,0.5);
+    cat.position.set(0,0,0);
+    scene.add(cat);
+  });
+
+  // Controls
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enablePan = false;
+  controls.enableZoom = false;
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.05;
+
+  window.addEventListener("resize",()=>{
+    camera.aspect=innerWidth/innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth,innerHeight);
+  });
+
+  document.addEventListener("keydown", e=> keys[e.key.toLowerCase()] = true);
+  document.addEventListener("keyup", e=> keys[e.key.toLowerCase()] = false);
+
+  // Fishing
+  document.addEventListener("keydown", e=>{
+    if(e.key.toLowerCase() === "e" && cat.position.distanceTo(pond.position)<6){
+      fishCount++;
+      document.getElementById("fish").textContent = fishCount;
+      console.log("Caught a fish!");
+    }
+  });
+
+  // Load saved collectibles
+  const saved = localStorage.getItem("cozy_cat_collected");
+  if(saved) collected = parseInt(saved);
+  document.getElementById("collectibles").textContent = collected;
+
+  const savedFish = localStorage.getItem("cozy_cat_fish");
+  if(savedFish) fishCount = parseInt(savedFish);
+  document.getElementById("fish").textContent = fishCount;
+
+  // Sounds
+  listener = new THREE.AudioListener();
+  camera.add(listener);
+  ambientSound = new THREE.Audio(listener);
+  birdsSound = new THREE.Audio(listener);
+  waterSound = new THREE.Audio(listener);
+  const audioLoader = new THREE.AudioLoader();
+  audioLoader.load("https://cdn.jsdelivr.net/gh/mrdoob/three.js@master/examples/sounds/358232_j_s_song.ogg", buffer=>{
+    ambientSound.setBuffer(buffer); ambientSound.setLoop(true); ambientSound.setVolume(0.2); ambientSound.play();
+  });
+  audioLoader.load("https://cdn.jsdelivr.net/gh/mrdoob/three.js@master/examples/sounds/birds.ogg", buffer=>{
+    birdsSound.setBuffer(buffer); birdsSound.setLoop(true); birdsSound.setVolume(0.15); birdsSound.play();
+  });
+  audioLoader.load("https://cdn.jsdelivr.net/gh/mrdoob/three.js@master/examples/sounds/water.ogg", buffer=>{
+    waterSound.setBuffer(buffer); waterSound.setLoop(true); waterSound.setVolume(0.1); waterSound.play();
+  });
+
+  // Rain
+  const rainGeo = new THREE.BufferGeometry();
+  const rainCount = 500;
+  const rainPositions = [];
+  for(let i=0;i<rainCount;i++){
+    rainPositions.push((Math.random()-0.5)*400, Math.random()*50+5, (Math.random()-0.5)*400);
+  }
+  rainGeo.setAttribute("position", new THREE.Float32BufferAttribute(rainPositions,3));
+  const rainMat = new THREE.PointsMaterial({color:0xaaaaff, size:0.1, transparent:true});
+  const rain = new THREE.Points(rainGeo,rainMat);
+  scene.add(rain);
+  rainParticles.push(rain);
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  if(cat){
+    const speed = 0.2;
+    if(keys["w"]) cat.position.z -= speed;
+    if(keys["s"]) cat.position.z += speed;
+    if(keys["a"]) cat.position.x -= speed;
+    if(keys["d"]) cat.position.x += speed;
+
+    controls.target.copy(cat.position);
+    controls.update();
+
+    checkCollectibles();
+  }
+
+  updateTime();
+  updateRain();
+  renderer.render(scene,camera);
+}
+
+function checkCollectibles(){
+  collectibles.forEach((c, idx)=>{
+    if(cat.position.distanceTo(c.position)<1){
+      scene.remove(c);
+      collectibles.splice(idx,1);
+      collected++;
+      document.getElementById("collectibles").textContent = collected;
+      localStorage.setItem("cozy_cat_collected", collected);
+    }
+  });
+  localStorage.setItem("cozy_cat_fish", fishCount);
+}
+
+function updateTime(){
+  clock += 0.002; // speed of time
+  if(clock>24) clock=0;
+  const hours=Math.floor(clock);
+  const minutes=Math.floor((clock%1)*60);
+  document.getElementById("time").textContent = `${hours.toString().padStart(2,"0")}:${minutes.toString().padStart(2,"0")}`;
+
+  // Ambient lighting
+  const t = Math.sin((clock/24)*Math.PI*2)*0.5+0.5;
+  scene.background = new THREE.Color().setHSL(0.6,0.6,t*0.2+0.1);
+}
+
+function updateRain(){
+  rainParticles.forEach(r=>{
+    const pos = r.geometry.attributes.position.array;
+    for(let i=1;i<pos.length;i+=3){
+      pos[i]-=0.5;
+      if(pos[i]<0) pos[i]=50;
+    }
+    r.geometry.attributes.position.needsUpdate=true;
+  });
+}
+</script>
+</body>
+</html>
