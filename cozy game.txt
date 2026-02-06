@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Cozy Survival RPG</title>
+<style>
+  body {
+    margin: 0;
+    font-family: monospace;
+    background: linear-gradient(#0f172a, #020617);
+    color: #e5e7eb;
+  }
+  .ui {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    height: 100vh;
+  }
+  .panel {
+    background: rgba(15,23,42,0.95);
+    padding: 14px;
+    border-right: 2px solid #1e293b;
+  }
+  .game {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .map {
+    width: 320px;
+    height: 320px;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    grid-template-rows: repeat(5, 1fr);
+    gap: 4px;
+  }
+  .tile {
+    background: #020617;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    opacity: 0.7;
+  }
+  .player {
+    background: #38bdf8;
+    color: #020617;
+    font-weight: bold;
+    opacity: 1;
+  }
+  .forest { background: #14532d; }
+  .lake { background: #1e3a8a; }
+  .meadow { background: #365314; }
+  .night .tile { filter: brightness(0.7); }
+  .log {
+    margin-top: 10px;
+    min-height: 60px;
+    font-size: 13px;
+    color: #cbd5f5;
+  }
+  .bar {
+    height: 8px;
+    background: #1e293b;
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 6px;
+  }
+  .fill { height: 100%; background: #4ade80; }
+  .red { background: #f87171; }
+</style>
+</head>
+<body>
+<div class="ui">
+  <div class="panel">
+    <h3>Cozy Survival</h3>
+    <p><b>Time:</b> <span id="time">Day</span></p>
+
+    <b>Health</b>
+    <div class="bar"><div id="healthBar" class="fill red"></div></div>
+
+    <b>Hunger</b>
+    <div class="bar"><div id="hungerBar" class="fill"></div></div>
+
+    <h4>Inventory</h4>
+    Food: <span id="food">0</span><br>
+    Herbs: <span id="herbs">0</span><br>
+    Fish: <span id="fish">0</span><br>
+
+    <h4>Skills</h4>
+    Hunting: <span id="huntSkill">1</span><br>
+    Gathering: <span id="gatherSkill">1</span><br>
+    Fishing: <span id="fishSkill">1</span><br>
+
+    <h4>Quest</h4>
+    Collect 3 Food, 3 Herbs, 3 Fish
+
+    <div class="log" id="log"></div>
+  </div>
+
+  <div class="game">
+    <div id="map" class="map"></div>
+  </div>
+</div>
+
+<script>
+const mapSize = 5;
+let player = { x: 2, y: 2 };
+let time = "Day";
+let health = 100;
+let hunger = 100;
+
+let inv = { food: 0, herbs: 0, fish: 0 };
+let skills = { hunt: 1, gather: 1, fish: 1 };
+
+const tiles = [];
+const mapEl = document.getElementById("map");
+const logEl = document.getElementById("log");
+
+function initMap() {
+  for (let i = 0; i < mapSize * mapSize; i++) {
+    const t = document.createElement("div");
+    const r = Math.random();
+    t.className = "tile " + (r < 0.33 ? "forest" : r < 0.66 ? "lake" : "meadow");
+    tiles.push(t);
+    mapEl.appendChild(t);
+  }
+  render();
+}
+
+function render() {
+  tiles.forEach((t, i) => {
+    t.textContent = "";
+    const x = i % mapSize;
+    const y = Math.floor(i / mapSize);
+    t.classList.toggle("player", x === player.x && y === player.y);
+    if (x === player.x && y === player.y) t.textContent = "☺";
+  });
+
+  document.getElementById("time").textContent = time;
+  document.getElementById("food").textContent = inv.food;
+  document.getElementById("herbs").textContent = inv.herbs;
+  document.getElementById("fish").textContent = inv.fish;
+
+  document.getElementById("huntSkill").textContent = skills.hunt;
+  document.getElementById("gatherSkill").textContent = skills.gather;
+  document.getElementById("fishSkill").textContent = skills.fish;
+
+  document.getElementById("healthBar").style.width = health + "%";
+  document.getElementById("hungerBar").style.width = hunger + "%";
+
+  document.body.classList.toggle("night", time === "Night");
+}
+
+function log(msg) {
+  logEl.textContent = msg;
+}
+
+function move(dx, dy) {
+  player.x = Math.max(0, Math.min(mapSize - 1, player.x + dx));
+  player.y = Math.max(0, Math.min(mapSize - 1, player.y + dy));
+  hunger = Math.max(0, hunger - 3);
+  if (hunger === 0) health = Math.max(0, health - 2);
+  maybeEncounter();
+  render();
+}
+
+function currentTile() {
+  return tiles[player.y * mapSize + player.x].classList[1];
+}
+
+function hunt() {
+  if (currentTile() !== "forest") return log("You need a forest to hunt.");
+  const chance = Math.random() < 0.4 + skills.hunt * 0.1;
+  if (chance) {
+    inv.food++;
+    skills.hunt++;
+    log("You hunted successfully. +Food, Hunting skill up!");
+  } else log("The animals hid today.");
+  render(); checkQuest();
+}
+
+function gather() {
+  if (currentTile() !== "meadow") return log("Best herbs grow in meadows.");
+  inv.herbs++;
+  skills.gather++;
+  log("You gathered fragrant herbs.");
+  render(); checkQuest();
+}
+
+function fish() {
+  if (currentTile() !== "lake") return log("You need water to fish.");
+  const chance = Math.random() < 0.4 + skills.fish * 0.1;
+  if (chance) {
+    inv.fish++;
+    skills.fish++;
+    log("You caught a shimmering fish!");
+  } else log("The fish were shy today.");
+  render(); checkQuest();
+}
+
+function maybeEncounter() {
+  if (Math.random() < 0.15) {
+    health = Math.max(0, health - 5);
+    log("A curious wolf startled you. You are okay, just shaken.");
+  }
+}
+
+function checkQuest() {
+  if (inv.food >= 3 && inv.herbs >= 3 && inv.fish >= 3) {
+    log("🌟 Quest Complete! You’ve built a cozy camp and survived peacefully.");
+  }
+}
+
+setInterval(() => {
+  time = time === "Day" ? "Night" : "Day";
+  render();
+}, 15000);
+
+document.addEventListener("keydown", e => {
+  if (e.key === "w") move(0, -1);
+  if (e.key === "s") move(0, 1);
+  if (e.key === "a") move(-1, 0);
+  if (e.key === "d") move(1, 0);
+  if (e.key === "h") hunt();
+  if (e.key === "g") gather();
+  if (e.key === "f") fish();
+});
+
+initMap();
+log("Welcome to your cozy wilderness. Use W/A/S/D to explore.");
+</script>
+</body>
+</html>
